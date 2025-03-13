@@ -1,4 +1,3 @@
-O'ktambek Shuxrat o'g'li 🍉, [13.03.2025 8:54]
 import streamlit as st
 import pandas as pd
 import os
