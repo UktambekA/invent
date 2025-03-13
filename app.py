@@ -434,4 +434,4 @@ def main():
             st.experimental_rerun()
 
 # Ilova ishga tushirish
-if __name__ == "__main__"
+if __name__ == __main__
