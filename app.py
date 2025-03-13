@@ -229,11 +229,11 @@ def main():
                             st.info("Rasim mavjud emas")
                     
                     with col2:
-                        st.write(f"Kod: {product['kod']}")
-                        st.write(f"Toifa: {product['toifa']}")
-                        st.write(f"Davlat: {product_data['davlat'].iloc[0]}")
-                        st.write(f"Do'kon ID: {product_data['dokon_id'].iloc[0]}")
-                        st.write(f"Omborchi: {product_data['omborchi'].iloc[0]}")
+                        st.write(f"**Kod:** {product['kod']}")
+                        st.write(f"**Toifa:** {product['toifa']}")
+                        st.write(f"**Davlat:** {product_data['davlat'].iloc[0]}")
+                        st.write(f"**Do'kon ID:** {product_data['dokon_id'].iloc[0]}")
+                        st.write(f"**Omborchi:** {product_data['omborchi'].iloc[0]}")
                         
                         # Ranglar jadvali
                         st.subheader("Ranglar va o'lchamlar")
@@ -272,7 +272,7 @@ def main():
                     
                     with open(excel_file, "rb") as f:
                         bytes_data = f.read()
-
+                    
                     st.download_button(
                         label="Excel faylni yuklab olish",
                         data=bytes_data,
@@ -283,5 +283,5 @@ def main():
                     if os.path.exists(excel_file):
                         os.remove(excel_file)
 
-if name == "main":
+if __name__ == "__main__":
     main()
