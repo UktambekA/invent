@@ -7,6 +7,9 @@ from datetime import datetime
 import os
 import uuid
 
+# Set page configuration at the very beginning
+st.set_page_config(page_title="Omborxona Boshqaruv Tizimi", layout="wide")
+
 # Loyihaning papka strukturasini yaratish
 def setup_directories():
     if not os.path.exists("images"):
@@ -205,7 +208,6 @@ def stats_page(df):
 def main():
     setup_directories()
 
-    st.set_page_config(page_title="Omborxona Boshqaruv Tizimi", layout="wide")
     st.title("Omborxona Boshqaruv Tizimi")
 
     # Asosiy ma'lumotlar
@@ -432,15 +434,4 @@ def main():
             st.experimental_rerun()
 
 # Ilova ishga tushirish
-if __name__ == "__main__":
-    # Sidebar menu
-    st.sidebar.title("Omborxona tizimi")
-    app_menu = st.sidebar.selectbox("Bo'lim", ["Asosiy sahifa", "Statistika"])
-
-    # Ma'lumotlarni yuklash
-    inventory_data = load_data()
-
-    if app_menu == "Asosiy sahifa":
-        main()
-    elif app_menu == "Statistika":
-        stats_page(inventory_data)
+if __name__ == "__main__
