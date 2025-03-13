@@ -1,4 +1,5 @@
-import streamlit as st
+
+        import streamlit as st
 import pandas as pd
 import io
 import base64
@@ -52,21 +53,20 @@ def display_image(image_path):
 # Excel fayl yaratish va yuklab olish
 def create_excel_download_link(df):
     output = io.BytesIO()
-    writer = pd.ExcelWriter(output, engine='xlsxwriter')
     
-    # Barcha mahsulotlar uchun umumiy ma'lumotlar
-    df.to_excel(writer, sheet_name='Barcha_Mahsulotlar', index=False)
-    
-    # Toifalar bo'yicha ma'lumotlar
-    for category in df['category'].unique():
-        category_df = df[df['category'] == category]
-        category_df.to_excel(writer, sheet_name=f"{category[:30]}", index=False)
-    
-    # Mahsulot ID va rasm yo'llari uchun alohida sheet
-    id_images_df = df[['product_id', 'product_name', 'image_path']]
-    id_images_df.to_excel(writer, sheet_name='Mahsulot_ID_Rasmlar', index=False)
-    
-    writer.close()
+    # Use pandas to export directly to BytesIO
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Barcha mahsulotlar uchun umumiy ma'lumotlar
+        df.to_excel(writer, sheet_name='Barcha_Mahsulotlar', index=False)
+        
+        # Toifalar bo'yicha ma'lumotlar
+        for category in df['category'].unique():
+            category_df = df[df['category'] == category]
+            category_df.to_excel(writer, sheet_name=f"{category[:30]}", index=False)
+        
+        # Mahsulot ID va rasm yo'llari uchun alohida sheet
+        id_images_df = df[['product_id', 'product_name', 'image_path']]
+        id_images_df.to_excel(writer, sheet_name='Mahsulot_ID_Rasmlar', index=False)
     
     b64 = base64.b64encode(output.getvalue()).decode()
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -101,6 +101,106 @@ def parse_colors_sizes(colors_sizes_str):
                         colors_dict[color][size.strip()] = int(qty.strip())
     
     return colors_dict
+
+# Statistika sahifasi
+def stats_page(df):
+    st.header("Omborxona statistikasi")
+    
+    if df.empty:
+        st.info("Statistika uchun ma'lumot mavjud emas.")
+        return
+    
+    # Umumiy mahsulotlar soni
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Jami mahsulotlar", len(df))
+    
+    with col2:
+        # Umumiy miqdorlarni hisoblash
+        total_items = 0
+        for _, row in df.iterrows():
+            colors_dict = parse_colors_sizes(row['colors_sizes_quantity'])
+            for color, sizes in colors_dict.items():
+                for size, qty in sizes.items():
+                    total_items += qty
+        st.metric("Jami mahsulot birliklari", total_items)
+    
+    with col3:
+        # Jami qiymat
+        total_value = 0
+        for _, row in df.iterrows():
+            colors_dict = parse_colors_sizes(row['colors_sizes_quantity'])
+            item_count = 0
+            for color, sizes in colors_dict.items():
+                for size, qty in sizes.items():
+                    item_count += qty
+            total_value += item_count * row['price']
+        
+        st.metric("Jami qiymat", f"{total_value:,.0f} so'm")
+    
+    # Toifalar bo'yicha statistika
+    st.subheader("Toifalar bo'yicha statistika")
+    category_counts = df['category'].value_counts().reset_index()
+    category_counts.columns = ['Toifa', 'Mahsulotlar soni']
+    
+    col1, col2 = st.columns([2, 3])
+    
+    with col1:
+        st.dataframe(category_counts)
+    
+    with col2:
+        st.bar_chart(category_counts.set_index('Toifa'))
+    
+    # Rang va o'lcham bo'yicha statistika
+    st.subheader("Ranglar va o'lchamlar statistikasi")
+    
+    # Ranglar va o'lchamlar sonini hisoblash
+    color_counts = {}
+    size_counts = {}
+    
+    for _, row in df.iterrows():
+        colors_dict = parse_colors_sizes(row['colors_sizes_quantity'])
+        for color, sizes in colors_dict.items():
+            if color not in color_counts:
+                color_counts[color] = 0
+            
+            for size, qty in sizes.items():
+                if size not in size_counts:
+                    size_counts[size] = 0
+                
+                color_counts[color] += qty
+                size_counts[size] += qty
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("Ranglar bo'yicha miqdorlar")
+        color_df = pd.DataFrame({
+            'Rang': list(color_counts.keys()),
+            'Miqdor': list(color_counts.values())
+        }).sort_values('Miqdor', ascending=False)
+        
+        st.dataframe(color_df)
+    
+    with col2:
+        st.write("O'lchamlar bo'yicha miqdorlar")
+        size_df = pd.DataFrame({
+            'O\'lcham': list(size_counts.keys()),
+            'Miqdor': list(size_counts.values())
+        }).sort_values('Miqdor', ascending=False)
+        
+        st.dataframe(size_df)
+    
+    # Omborchilar statistikasi
+    st.subheader("Omborchilar statistikasi")
+    manager_counts = df['warehouse_manager'].value_counts().reset_index()
+    manager_counts.columns = ['Omborchi', 'Mahsulotlar soni']
+    
+    st.dataframe(manager_counts)
+    
+    # Excel yuklab olish
+    st.markdown(create_excel_download_link(df), unsafe_allow_html=True)
 
 # Asosiy ilova
 def main():
@@ -216,7 +316,6 @@ def main():
             })
         
         col1, col2 = st.columns(2)
-        
         with col1:
             product_id = st.text_input("Mahsulot ID", value=product_data['product_id'], disabled=True)
             product_name = st.text_input("Mahsulot nomi", value=product_data['product_name'])
