@@ -435,3 +435,14 @@ def main():
 
 # Ilova ishga tushirish
 if __name__ == "__main__":
+      # Sidebar menu
+    st.sidebar.title("Omborxona tizimi")
+    app_menu = st.sidebar.selectbox("Bo'lim", ["Asosiy sahifa", "Statistika"])
+
+    # Ma'lumotlarni yuklash
+    inventory_data = load_data()
+
+    if app_menu == "Asosiy sahifa":
+        main()
+    elif app_menu == "Statistika":
+        stats_page(inventory_data)
