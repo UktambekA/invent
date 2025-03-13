@@ -3,446 +3,455 @@ import pandas as pd
 import io
 import base64
 from PIL import Image
-from datetime import datetime
 import os
-import uuid
+from datetime import datetime
 
-# Set page configuration at the very beginning
-st.set_page_config(page_title="Omborxona Boshqaruv Tizimi", layout="wide")
-
-# Loyihaning papka strukturasini yaratish
-def setup_directories():
+# Papka yaratish funksiyasi
+def create_folders():
     if not os.path.exists("images"):
         os.makedirs("images")
     if not os.path.exists("data"):
         os.makedirs("data")
 
-# Ma'lumotlarni saqlash
-def save_data(df):
-    df.to_csv("data/inventory_data.csv", index=False)
+# Ma'lumotlarni saqlash funksiyasi
+def save_data(df, filename="data/inventory_data.csv"):
+    df.to_csv(filename, index=False)
 
-# Ma'lumotlarni yuklash
-def load_data():
+# Ma'lumotlarni yuklash funksiyasi
+def load_data(filename="data/inventory_data.csv"):
     try:
-        return pd.read_csv("data/inventory_data.csv")
+        return pd.read_csv(filename)
     except FileNotFoundError:
-        return pd.DataFrame(columns=[
-            'product_id', 'product_name', 'category', 'country_of_origin',
-            'store_id', 'warehouse_manager', 'image_path', 'colors_sizes_quantity', 'price'
-        ])
+        # Agar fayl topilmasa, yangi DataFrame yaratamiz
+        return pd.DataFrame({
+            'mahsulot_id': [],
+            'mahsulot_nomi': [],
+            'rasm_joyi': [],
+            'toifa': [],
+            'davlat': [],
+            'dokon_id': [],
+            'omborchi': [],
+            'rang': [],
+            'olcham': [],
+            'miqdor': [],
+            'narx': []
+        })
 
-# Rasm yuklash
-def save_uploaded_image(uploaded_file):
-    if uploaded_file is not None:
-        file_extension = os.path.splitext(uploaded_file.name)[1]
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
-        img_path = os.path.join("images", unique_filename)
+# Rasmni saqlash funksiyasi
+def save_image(image, product_id):
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    image_path = f"images/{product_id}_{timestamp}.jpg"
+    image.save(image_path)
+    return image_path
 
-        with open(img_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-
-        return img_path
-    return None
-
-# Rasm ko'rsatish
-def display_image(image_path):
-    if image_path and os.path.exists(image_path):
-        img = Image.open(image_path)
-        st.image(img, width=200)
-    else:
-        st.write("Rasm mavjud emas")
-
-# Excel fayl yaratish va yuklab olish
-def create_excel_download_link(df):
+# Excel faylni yuklash funksiyasi
+def to_excel(df, filename="omborxona_malumotlari.xlsx"):
     output = io.BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    
+    # Barcha ma'lumotlar uchun sheet
+    df.to_excel(writer, sheet_name='Barcha_Malumotlar', index=False)
+    
+    # Toifalar bo'yicha sheets
+    toifalar = df['toifa'].unique()
+    for toifa in toifalar:
+        toifa_df = df[df['toifa'] == toifa]
+        toifa_df.to_excel(writer, sheet_name=f'Toifa_{toifa}', index=False)
+    
+    # Mahsulot ID va rasmlar uchun sheet
+    id_rasm_df = df[['mahsulot_id', 'rasm_joyi']].drop_duplicates()
+    id_rasm_df.to_excel(writer, sheet_name='ID_va_Rasmlar', index=False)
+    
+    writer.close()
+    processed_data = output.getvalue()
+    return processed_data
 
-    # Use pandas to export directly to BytesIO
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Barcha mahsulotlar uchun umumiy ma'lumotlar
-        df.to_excel(writer, sheet_name='Barcha_Mahsulotlar', index=False)
+# Download link funksiyasi
+def get_download_link(df, filename="omborxona_malumotlari.xlsx"):
+    """Excel faylni yuklab olish uchun link yaratadi"""
+    val = to_excel(df)
+    b64 = base64.b64encode(val).decode()
+    return f'<a href="data:application/octet-stream;base64,{b64}" download="{filename}">Excel faylni yuklab olish</a>'
 
-        # Toifalar bo'yicha ma'lumotlar
-        for category in df['category'].unique():
-            category_df = df[df['category'] == category]
-            category_df.to_excel(writer, sheet_name=f"{category[:30]}", index=False)
-
-        # Mahsulot ID va rasm yo'llari uchun alohida sheet
-        id_images_df = df[['product_id', 'product_name', 'image_path']]
-        id_images_df.to_excel(writer, sheet_name='Mahsulot_ID_Rasmlar', index=False)
-
-    b64 = base64.b64encode(output.getvalue()).decode()
-    current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    return f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="ombor_malumotlari_{current_time}.xlsx">Excel faylni yuklab olish</a>'
-
-# Rang va o'lcham ma'lumotlarini formatlash
-def format_colors_sizes(colors_dict):
-    result = []
-    for color, sizes in colors_dict.items():
-        size_str = ", ".join([f"{size}-{qty}" for size, qty in sizes.items()])
-        result.append(f"{color}: {size_str}")
-    return "; ".join(result)
-
-# Saqlangan rang va o'lcham ma'lumotlarini qayta ishlash
-def parse_colors_sizes(colors_sizes_str):
-    colors_dict = {}
-    if pd.isna(colors_sizes_str):
-        return colors_dict
-
-    color_blocks = colors_sizes_str.split("; ")
-    for block in color_blocks:
-        if ":" in block:
-            color, sizes_str = block.split(":", 1)
-            color = color.strip()
-            colors_dict[color] = {}
-
-            if sizes_str.strip():
-                size_qty_pairs = sizes_str.strip().split(", ")
-                for pair in size_qty_pairs:
-                    if "-" in pair:
-                        size, qty = pair.split("-", 1)
-                        colors_dict[color][size.strip()] = int(qty.strip())
-
-    return colors_dict
-
-# Statistika sahifasi
-def stats_page(df):
-    st.header("Omborxona statistikasi")
-
-    if df.empty:
-        st.info("Statistika uchun ma'lumot mavjud emas.")
-        return
-
-    # Umumiy mahsulotlar soni
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric("Jami mahsulotlar", len(df))
-
-    with col2:
-        # Umumiy miqdorlarni hisoblash
-        total_items = 0
-        for _, row in df.iterrows():
-            colors_dict = parse_colors_sizes(row['colors_sizes_quantity'])
-            for color, sizes in colors_dict.items():
-                for size, qty in sizes.items():
-                    total_items += qty
-        st.metric("Jami mahsulot birliklari", total_items)
-
-    with col3:
-        # Jami qiymat
-        total_value = 0
-        for _, row in df.iterrows():
-            colors_dict = parse_colors_sizes(row['colors_sizes_quantity'])
-            item_count = 0
-            for color, sizes in colors_dict.items():
-                for size, qty in sizes.items():
-                    item_count += qty
-            total_value += item_count * row['price']
-
-        st.metric("Jami qiymat", f"{total_value:,.0f} so'm")
-
-    # Toifalar bo'yicha statistika
-    st.subheader("Toifalar bo'yicha statistika")
-    category_counts = df['category'].value_counts().reset_index()
-    category_counts.columns = ['Toifa', 'Mahsulotlar soni']
-
-    col1, col2 = st.columns([2, 3])
-
-    with col1:
-        st.dataframe(category_counts)
-
-    with col2:
-        st.bar_chart(category_counts.set_index('Toifa'))
-
-    # Rang va o'lcham bo'yicha statistika
-    st.subheader("Ranglar va o'lchamlar statistikasi")
-
-    # Ranglar va o'lchamlar sonini hisoblash
-    color_counts = {}
-    size_counts = {}
-
-    for _, row in df.iterrows():
-        colors_dict = parse_colors_sizes(row['colors_sizes_quantity'])
-        for color, sizes in colors_dict.items():
-            if color not in color_counts:
-                color_counts[color] = 0
-
-            for size, qty in sizes.items():
-                if size not in size_counts:
-                    size_counts[size] = 0
-
-                color_counts[color] += qty
-                size_counts[size] += qty
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.write("Ranglar bo'yicha miqdorlar")
-        color_df = pd.DataFrame({
-            'Rang': list(color_counts.keys()),
-            'Miqdor': list(color_counts.values())
-        }).sort_values('Miqdor', ascending=False)
-
-        st.dataframe(color_df)
-
-    with col2:
-        st.write("O'lchamlar bo'yicha miqdorlar")
-        size_df = pd.DataFrame({
-            'O\'lcham': list(size_counts.keys()),
-            'Miqdor': list(size_counts.values())
-        }).sort_values('Miqdor', ascending=False)
-
-        st.dataframe(size_df)
-
-    # Omborchilar statistikasi
-    st.subheader("Omborchilar statistikasi")
-    manager_counts = df['warehouse_manager'].value_counts().reset_index()
-    manager_counts.columns = ['Omborchi', 'Mahsulotlar soni']
-
-    st.dataframe(manager_counts)
-
-    # Excel yuklab olish
-    st.markdown(create_excel_download_link(df), unsafe_allow_html=True)
-
-# Asosiy ilova
+# Asosiy dastur
 def main():
-    setup_directories()
-
-    st.title("Omborxona Boshqaruv Tizimi")
-
-    # Asosiy ma'lumotlar
-    df = load_data()
-
-    # Sessiya holati
-    if 'editing_product_id' not in st.session_state:
-        st.session_state.editing_product_id = None
-
-    if 'colors_data' not in st.session_state:
-        st.session_state.colors_data = {}
-
-    # Sidebar menyu
-    st.sidebar.title("Boshqaruv paneli")
-    menu = st.sidebar.radio("Menu", ["Mahsulotlarni ko'rish", "Mahsulot qo'shish/tahrirlash"])
-
-    # Do'kon va omborchi ma'lumotlari
-    with st.sidebar.expander("Do'kon ma'lumotlari"):
-        store_id = st.text_input("Do'kon ID")
-        warehouse_manager = st.text_input("Omborchi ismi")
-        country_of_origin = st.text_input("Ishlab chiqarilgan davlat")
-
-    if menu == "Mahsulotlarni ko'rish":
-        st.header("Barcha mahsulotlar")
-
-        if not df.empty:
-            # Filter options
-            col1, col2 = st.columns(2)
-            with col1:
-                filter_category = st.multiselect("Toifa bo'yicha filtrlash", options=df['category'].unique())
-
-            with col2:
-                search_term = st.text_input("Qidirish (mahsulot nomi yoki ID)")
-
-            # Apply filters
-            filtered_df = df.copy()
-            if filter_category:
-                filtered_df = filtered_df[filtered_df['category'].isin(filter_category)]
-
-            if search_term:
-                search_mask = (
-                    filtered_df['product_name'].str.contains(search_term, case=False, na=False) |
-                    filtered_df['product_id'].str.contains(search_term, case=False, na=False)
-                )
-                filtered_df = filtered_df[search_mask]
-
-            # Display products
-            if not filtered_df.empty:
-                for _, row in filtered_df.iterrows():
-                    col1, col2, col3 = st.columns([1, 2, 1])
-
-                    with col1:
-                        display_image(row['image_path'])
-
-                    with col2:
-                        st.subheader(row['product_name'])
-                        st.write(f"**ID:** {row['product_id']}")
-                        st.write(f"**Toifa:** {row['category']}")
-                        st.write(f"**Ishlab chiqarilgan davlat:** {row['country_of_origin']}")
-                        st.write(f"**Do'kon ID:** {row['store_id']}")
-                        st.write(f"**Omborchi:** {row['warehouse_manager']}")
-                        st.write(f"**Narxi:** {row['price']}")
-
-                        st.write("**Rang va o'lchamlar:**")
-                        colors_dict = parse_colors_sizes(row['colors_sizes_quantity'])
-                        for color, sizes in colors_dict.items():
-                            sizes_str = ", ".join([f"{size}: {qty} dona" for size, qty in sizes.items()])
-                            st.write(f"- {color}: {sizes_str}")
-
-                    with col3:
-                        if st.button(f"Tahrirlash", key=f"edit_{row['product_id']}"):
-                            st.session_state.editing_product_id = row['product_id']
-                            st.session_state.colors_data = parse_colors_sizes(row['colors_sizes_quantity'])
-                            st.experimental_rerun()
-
-                        if st.button(f"O'chirish", key=f"delete_{row['product_id']}"):
-                            df = df[df['product_id'] != row['product_id']]
-                            save_data(df)
-                            st.success("Mahsulot o'chirildi!")
-                            st.experimental_rerun()
-
-                    st.markdown("---")
-
-                # Excel ga yuklab olish tugmasi
-                st.markdown(create_excel_download_link(filtered_df), unsafe_allow_html=True)
-            else:
-                st.warning("Qidirish natijasi bo'yicha mahsulot topilmadi.")
-        else:
-            st.info("Hozircha mahsulotlar mavjud emas. Iltimos, yangi mahsulot qo'shing.")
-
-    elif menu == "Mahsulot qo'shish/tahrirlash":
-        if st.session_state.editing_product_id:
-            st.header("Mahsulotni tahrirlash")
-            product_data = df[df['product_id'] == st.session_state.editing_product_id].iloc[0]
-        else:
-            st.header("Yangi mahsulot qo'shish")
-            product_data = pd.Series({
-                'product_id': str(uuid.uuid4())[:8],
-                'product_name': "",
-                'category': "",
-                'country_of_origin': country_of_origin,
-                'store_id': store_id,
-                'warehouse_manager': warehouse_manager,
-                'image_path': "",
-                'colors_sizes_quantity': "",
-                'price': 0
-            })
-
-        col1, col2 = st.columns(2)
-        with col1:
-            product_id = st.text_input("Mahsulot ID", value=product_data['product_id'], disabled=True)
-            product_name = st.text_input("Mahsulot nomi", value=product_data['product_name'])
-            category = st.selectbox("Toifa", options=["Ayollar", "Erkaklar", "Bolalar", "Qizlar"], index=0 if product_data['category'] == "" else ["Ayollar", "Erkaklar", "Bolalar", "Qizlar"].index(product_data['category']))
-            uploaded_file = st.file_uploader("Mahsulot rasmi", type=["jpg", "png", "jpeg"])
-            price = st.number_input("Narx", value=float(product_data['price']) if product_data['price'] else 0.0, step=1000.0)
-
-        with col2:
-            if st.session_state.editing_product_id and product_data['image_path'] and os.path.exists(product_data['image_path']):
-                st.write("Joriy rasm:")
-                display_image(product_data['image_path'])
-
-            # Rang va o'lchamlar boshqaruvi
-            st.subheader("Rang va o'lchamlar")
-
-            available_colors = ["Qora", "Oq", "Ko'k", "Qizil", "Yashil", "Jigarrang", "Sariq", "Kulrang", "Pushti", "Boshqa"]
-            available_sizes = ["XS", "S", "M", "L", "XL", "XXL", "XXXL", "Bir o'lcham"]
-
-            # Rang qo'shish
-            col_color, col_add = st.columns([3, 1])
-            with col_color:
-                new_color = st.selectbox("Rang tanlang", options=available_colors)
-
-            with col_add:
-                st.write("")
-                st.write("")
-                if st.button("Rang qo'shish"):
-                    if new_color not in st.session_state.colors_data:
-                        st.session_state.colors_data[new_color] = {}
-
-            # Mavjud ranglar va o'lchamlar
-            for color in list(st.session_state.colors_data.keys()):
-                st.markdown(f"**{color}**")
-                col_size, col_qty, col_remove = st.columns([2, 1, 1])
-
-                with col_size:
-                    new_size = st.selectbox(f"O'lcham ({color})", options=available_sizes, key=f"size_{color}")
-
-                with col_qty:
-                    new_qty = st.number_input(f"Miqdor", min_value=0, step=1, key=f"qty_{color}")
-
-                with col_remove:
-                    if st.button("Qo'shish", key=f"add_size_{color}"):
-                        st.session_state.colors_data[color][new_size] = new_qty
-                        st.experimental_rerun()
-
-                # O'lchamlarni ko'rsatish
-                if st.session_state.colors_data[color]:
-                    size_cols = st.columns(len(st.session_state.colors_data[color]) if len(st.session_state.colors_data[color]) > 0 else 1)
-                    for i, (size, qty) in enumerate(st.session_state.colors_data[color].items()):
-                        with size_cols[i % len(size_cols)]:
-                            st.write(f"{size}: {qty} dona")
-                            if st.button(f"O'chirish", key=f"remove_{color}_{size}"):
-                                del st.session_state.colors_data[color][size]
-                                if not st.session_state.colors_data[color]:  # Agar rangning o'lchamlari qolmasa
-                                    del st.session_state.colors_data[color]
-                                st.experimental_rerun()
-
-                st.markdown("---")
-
-        # Saqlash tugmasi
-        if st.button("Saqlash"):
-            # Majburiy maydonlarni tekshirish
-            if not product_name:
-                st.error("Mahsulot nomini kiriting!")
-                return
-
-            if not st.session_state.colors_data:
-                st.error("Kamida bitta rang va o'lcham qo'shing!")
-                return
-
-            # Rasm yo'li
-            image_path = product_data['image_path']
-            if uploaded_file:
-                image_path = save_uploaded_image(uploaded_file)
-
-            # Rang va o'lchamlar formatini tayyorlash
-            colors_sizes_quantity = format_colors_sizes(st.session_state.colors_data)
-
-            # Yangi ma'lumotlar
-            new_data = {
-                'product_id': product_id,
-                'product_name': product_name,
-                'category': category,
-                'country_of_origin': country_of_origin,
-                'store_id': store_id,
-                'warehouse_manager': warehouse_manager,
-                'image_path': image_path,
-                'colors_sizes_quantity': colors_sizes_quantity,
-                'price': price
-            }
-
-            # Ma'lumotlarni yangilash yoki qo'shish
-            if st.session_state.editing_product_id:
-                df.loc[df['product_id'] == st.session_state.editing_product_id] = new_data
-                success_message = "Mahsulot muvaffaqiyatli yangilandi!"
-            else:
-                df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
-                success_message = "Yangi mahsulot muvaffaqiyatli qo'shildi!"
-
-            # Ma'lumotlarni saqlash
-            save_data(df)
-
-            # Sessiya holatini qayta o'rnatish
-            st.session_state.editing_product_id = None
-            st.session_state.colors_data = {}
-
-            st.success(success_message)
-            st.experimental_rerun()
-
-        # Bekor qilish tugmasi
-        if st.session_state.editing_product_id and st.button("Bekor qilish"):
-            st.session_state.editing_product_id = None
-            st.session_state.colors_data = {}
-            st.experimental_rerun()
-
-# Ilova ishga tushirish
-if __name__ == "__main__":
-      # Sidebar menu
-    st.sidebar.title("Omborxona tizimi")
-    app_menu = st.sidebar.selectbox("Bo'lim", ["Asosiy sahifa", "Statistika"])
-
-    # Ma'lumotlarni yuklash
+    create_folders()
+    
+    st.set_page_config(page_title="Omborxona Boshqarish Tizimi", layout="wide")
+    
+    st.title("Omborxona Boshqarish Tizimi")
+    
+    # Inventar ma'lumotlarini yuklash
     inventory_data = load_data()
+    
+    # Sidebar - Amal tanlash
+    st.sidebar.title("Boshqarish paneli")
+    action = st.sidebar.radio("Tanlang:", ["Mahsulot qo'shish", "Mahsulotlarni ko'rish", "Mahsulotni tahrirlash"])
+    
+    # Umumiy ma'lumotlar (barcha mahsulotlar uchun bir xil)
+    if action in ["Mahsulot qo'shish"]:
+        with st.sidebar.expander("Umumiy ma'lumotlar", expanded=True):
+            dokon_id = st.text_input("Do'kon ID", value=st.session_state.get('dokon_id', ''))
+            omborchi = st.text_input("Omborchi ismi", value=st.session_state.get('omborchi', ''))
+            davlat = st.text_input("Ishlab chiqarilgan davlat", value=st.session_state.get('davlat', ''))
+            
+            # Session state'ga saqlash
+            if dokon_id:
+                st.session_state['dokon_id'] = dokon_id
+            if omborchi:
+                st.session_state['omborchi'] = omborchi
+            if davlat:
+                st.session_state['davlat'] = davlat
+    
+    # Mahsulot qo'shish
+    if action == "Mahsulot qo'shish":
+        st.header("Yangi mahsulot qo'shish")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            mahsulot_id = st.text_input("Mahsulot kodi", key="m_id")
+            mahsulot_nomi = st.text_input("Mahsulot nomi", key="m_nomi")
+            toifa = st.selectbox("Toifa", ["Erkaklar", "Ayollar", "Bolalar", "Qizlar"], key="toifa")
+            
+            # Rasm yuklash
+            uploaded_file = st.file_uploader("Mahsulot rasmini yuklang", type=["jpg", "jpeg", "png"])
+            if uploaded_file is not None:
+                image = Image.open(uploaded_file)
+                st.image(image, caption='Yuklangan rasm', width=300)
+            
+            # Kamera bilan rasm olish
+            use_camera = st.checkbox("Kamera bilan rasm olish")
+            if use_camera:
+                camera_input = st.camera_input("Rasm olish")
+                if camera_input is not None:
+                    image = Image.open(camera_input)
+                    st.image(image, caption='Olingan rasm', width=300)
+                    uploaded_file = camera_input
+        
+        with col2:
+            # Ranglar va o'lchamlar
+            st.subheader("Ranglar va o'lchamlar")
+            
+            # Ranglar ro'yxati
+            available_colors = ["Qora", "Oq", "Ko'k", "Qizil", "Yashil", "Sariq", "Jigarrang", "Kulrang"]
+            
+            # Yangi rang qo'shish
+            new_color = st.text_input("Yangi rang qo'shish (ixtiyoriy)")
+            if new_color and new_color not in available_colors:
+                available_colors.append(new_color)
+            
+            # Tanlangan ranglarni saqlash uchun konteyner
+            if 'selected_colors' not in st.session_state:
+                st.session_state.selected_colors = []
+            
+            # Rang tanlash
+            selected_color = st.selectbox("Rang tanlang", available_colors)
+            
+            # O'lchamlar
+            olcham_options = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+            olcham = st.selectbox("O'lcham", olcham_options)
+            miqdor = st.number_input("Miqdor", min_value=0, step=1)
+            narx = st.number_input("Narx", min_value=0, step=1000)
+            
+            # Tanlangan rangni qo'shish
+            if st.button("Rang/o'lcham qo'shish"):
+                new_item = {
+                    "rang": selected_color,
+                    "olcham": olcham,
+                    "miqdor": miqdor,
+                    "narx": narx
+                }
+                st.session_state.selected_colors.append(new_item)
+                st.success(f"Qo'shildi: {selected_color} - {olcham}, {miqdor} dona, {narx} so'm")
+            
+            # Tanlangan ranglarni ko'rsatish
+            if st.session_state.selected_colors:
+                st.subheader("Qo'shilgan ranglar va o'lchamlar")
+                for i, item in enumerate(st.session_state.selected_colors):
+                    st.write(f"{i+1}. {item['rang']} - {item['olcham']}, {item['miqdor']} dona, {item['narx']} so'm")
+                
+                if st.button("Tanlangan rangni o'chirish"):
+                    if st.session_state.selected_colors:
+                        st.session_state.selected_colors.pop()
+                        st.success("Oxirgi element o'chirildi!")
+        
+        # Mahsulotni saqlash
+        if st.button("Mahsulotni saqlash", key="save_product"):
+            if not mahsulot_id or not mahsulot_nomi or not uploaded_file or not st.session_state.selected_colors:
+                st.error("Iltimos, barcha zarur ma'lumotlarni to'ldiring!")
+            else:
+                # Rasmni saqlash
+                image = Image.open(uploaded_file)
+                image_path = save_image(image, mahsulot_id)
+                
+                # Yangi qatorlar yaratish
+                new_rows = []
+                for item in st.session_state.selected_colors:
+                    new_rows.append({
+                        'mahsulot_id': mahsulot_id,
+                        'mahsulot_nomi': mahsulot_nomi,
+                        'rasm_joyi': image_path,
+                        'toifa': toifa,
+                        'davlat': st.session_state.get('davlat', ''),
+                        'dokon_id': st.session_state.get('dokon_id', ''),
+                        'omborchi': st.session_state.get('omborchi', ''),
+                        'rang': item['rang'],
+                        'olcham': item['olcham'],
+                        'miqdor': item['miqdor'],
+                        'narx': item['narx']
+                    })
+                
+                # Ma'lumotlarni yangilash
+                new_data = pd.DataFrame(new_rows)
+                inventory_data = pd.concat([inventory_data, new_data], ignore_index=True)
+                save_data(inventory_data)
+                
+                st.success("Mahsulot muvaffaqiyatli saqlandi!")
+                st.session_state.selected_colors = []  # Ranglar ro'yxatini tozalash
+                
+                # Formani tozalash (refresh qilish)
+                st.experimental_rerun()
+    
+    # Mahsulotlarni ko'rish
+    elif action == "Mahsulotlarni ko'rish":
+        st.header("Barcha mahsulotlar")
+        
+        if inventory_data.empty:
+            st.warning("Hozircha ma'lumotlar mavjud emas")
+        else:
+            # Filtrlar
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                filter_toifa = st.multiselect("Toifa bo'yicha saralash", options=inventory_data['toifa'].unique())
+            with col2:
+                filter_rang = st.multiselect("Rang bo'yicha saralash", options=inventory_data['rang'].unique())
+            with col3:
+                filter_olcham = st.multiselect("O'lcham bo'yicha saralash", options=inventory_data['olcham'].unique())
+            
+            # Filter qo'llash
+            filtered_data = inventory_data.copy()
+            if filter_toifa:
+                filtered_data = filtered_data[filtered_data['toifa'].isin(filter_toifa)]
+            if filter_rang:
+                filtered_data = filtered_data[filtered_data['rang'].isin(filter_rang)]
+            if filter_olcham:
+                filtered_data = filtered_data[filtered_data['olcham'].isin(filter_olcham)]
+            
+            # Natijalarni ko'rsatish
+            st.write(f"Jami {len(filtered_data)} ta mahsulot topildi")
+            st.dataframe(filtered_data)
+            
+            # Excel yuklab olish
+            st.markdown(get_download_link(filtered_data), unsafe_allow_html=True)
+            
+            # Mahsulot detallarini ko'rish
+            selected_product_id = st.selectbox("Mahsulot detallarini ko'rish", options=filtered_data['mahsulot_id'].unique())
+            
+            if selected_product_id:
+                product_details = filtered_data[filtered_data['mahsulot_id'] == selected_product_id]
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader(f"Mahsulot: {product_details['mahsulot_nomi'].iloc[0]}")
+                    st.write(f"ID: {selected_product_id}")
+                    st.write(f"Toifa: {product_details['toifa'].iloc[0]}")
+                    st.write(f"Davlat: {product_details['davlat'].iloc[0]}")
+                    st.write(f"Do'kon ID: {product_details['dokon_id'].iloc[0]}")
+                    st.write(f"Omborchi: {product_details['omborchi'].iloc[0]}")
+                
+                with col2:
+                    # Rasmni ko'rsatish
+                    try:
+                        image_path = product_details['rasm_joyi'].iloc[0]
+                        if os.path.exists(image_path):
+                            image = Image.open(image_path)
+                            st.image(image, caption='Mahsulot rasmi', width=300)
+                        else:
+                            st.warning("Rasm topilmadi")
+                    except Exception as e:
+                        st.error(f"Rasmni yuklashda xatolik: {e}")
+                
+                # Rang va o'lchamlar jadvalini ko'rsatish
+                st.subheader("Ranglar va o'lchamlar")
+                
+                # Group by rang and olcham
+                colors_df = product_details[['rang', 'olcham', 'miqdor', 'narx']].copy()
+                colors_df = colors_df.sort_values(['rang', 'olcham'])
+                
+                # Show the table
+                st.dataframe(colors_df)
+    
+    # Mahsulotni tahrirlash
+    elif action == "Mahsulotni tahrirlash":
+        st.header("Mahsulotni tahrirlash")
+        
+        if inventory_data.empty:
+            st.warning("Hozircha ma'lumotlar mavjud emas")
+        else:
+            # Mahsulot tanlash
+            selected_product_id = st.selectbox("Tahrirlash uchun mahsulot tanlang", options=inventory_data['mahsulot_id'].unique())
+            
+            if selected_product_id:
+                product_data = inventory_data[inventory_data['mahsulot_id'] == selected_product_id]
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Asosiy ma'lumotlarni tahrirlash
+                    st.subheader("Asosiy ma'lumotlar")
+                    
+                    # Mavjud ma'lumotlarni olish
+                    current_name = product_data['mahsulot_nomi'].iloc[0]
+                    current_toifa = product_data['toifa'].iloc[0]
+                    current_davlat = product_data['davlat'].iloc[0]
+                    current_dokon_id = product_data['dokon_id'].iloc[0]
+                    current_omborchi = product_data['omborchi'].iloc[0]
+                    current_image_path = product_data['rasm_joyi'].iloc[0]
+                    
+                    # Tahrirlash formasini ko'rsatish
+                    new_name = st.text_input("Mahsulot nomi", value=current_name)
+                    new_toifa = st.selectbox("Toifa", ["Erkaklar", "Ayollar", "Bolalar", "Qizlar"], index=["Erkaklar", "Ayollar", "Bolalar", "Qizlar"].index(current_toifa))
+                    new_davlat = st.text_input("Ishlab chiqarilgan davlat", value=current_davlat)
+                    new_dokon_id = st.text_input("Do'kon ID", value=current_dokon_id)
+                    new_omborchi = st.text_input("Omborchi ismi", value=current_omborchi)
+                    
+                    # Rasmni ko'rsatish
+                    try:
+                        if os.path.exists(current_image_path):
+                            image = Image.open(current_image_path)
+                            st.image(image, caption='Joriy rasm', width=300)
+                        else:
+                            st.warning("Rasm topilmadi")
+                    except Exception as e:
+                        st.error(f"Rasmni yuklashda xatolik: {e}")
+                    
+                    # Yangi rasm yuklash
+                    new_image = st.file_uploader("Yangi rasm (ixtiyoriy)", type=["jpg", "jpeg", "png"])
+                    
+                    # Kamera bilan rasm olish
+                    use_camera = st.checkbox("Kamera bilan yangi rasm olish")
+                    if use_camera:
+                        camera_input = st.camera_input("Rasm olish")
+                        if camera_input is not None:
+                            new_image = camera_input
+                
+                with col2:
+                    # Rang va o'lchamlarni tahrirlash
+                    st.subheader("Ranglar va o'lchamlar")
+                    
+                    # Mavjud rang/o'lchamlarni ko'rsatish
+                    unique_color_sizes = product_data[['rang', 'olcham', 'miqdor', 'narx']].drop_duplicates()
+                    
+                    # Rang va o'lcham tanlash
+                    selected_row_index = st.selectbox(
+                        "Tahrirlash uchun qatorni tanlang", 
+                        range(len(unique_color_sizes)), 
+                        format_func=lambda i: f"{unique_color_sizes.iloc[i]['rang']} - {unique_color_sizes.iloc[i]['olcham']}, {unique_color_sizes.iloc[i]['miqdor']} dona, {unique_color_sizes.iloc[i]['narx']} so'm"
+                    )
+                    
+                    if selected_row_index is not None:
+                        selected_row = unique_color_sizes.iloc[selected_row_index]
+                        
+                        # Tahrirlash formasi
+                        new_rang = st.text_input("Rang", value=selected_row['rang'])
+                        new_olcham = st.selectbox("O'lcham", ["XS", "S", "M", "L", "XL", "XXL", "XXXL"], index=["XS", "S", "M", "L", "XL", "XXL", "XXXL"].index(selected_row['olcham']) if selected_row['olcham'] in ["XS", "S", "M", "L", "XL", "XXL", "XXXL"] else 0)
+                        new_miqdor = st.number_input("Miqdor", min_value=0, step=1, value=int(selected_row['miqdor']))
+                        new_narx = st.number_input("Narx", min_value=0, step=1000, value=int(selected_row['narx']))
+                        
+                        # Saqlash tugmasi
+                        if st.button("Rang/o'lcham o'zgarishlarini saqlash"):
+                            # Filter the rows that need to be updated
+                            mask = (
+                                (inventory_data['mahsulot_id'] == selected_product_id) & 
+                                (inventory_data['rang'] == selected_row['rang']) & 
+                                (inventory_data['olcham'] == selected_row['olcham'])
+                            )
+                            
+                            # Update the values
+                            inventory_data.loc[mask, 'rang'] = new_rang
+                            inventory_data.loc[mask, 'olcham'] = new_olcham
+                            inventory_data.loc[mask, 'miqdor'] = new_miqdor
+                            inventory_data.loc[mask, 'narx'] = new_narx
+                            
+                            # Save the updated data
+                            save_data(inventory_data)
+                            st.success("Ranglar va o'lchamlar muvaffaqiyatli yangilandi!")
+                            st.experimental_rerun()
+                    
+                    # Yangi rang/o'lcham qo'shish
+                    st.subheader("Yangi rang/o'lcham qo'shish")
+                    
+                    # Ranglar ro'yxati
+                    available_colors = ["Qora", "Oq", "Ko'k", "Qizil", "Yashil", "Sariq", "Jigarrang", "Kulrang"]
+                    unique_colors = product_data['rang'].unique()
+                    for color in unique_colors:
+                        if color not in available_colors:
+                            available_colors.append(color)
+                    
+                    add_color = st.selectbox("Rang", available_colors)
+                    add_olcham = st.selectbox("O'lcham", ["XS", "S", "M", "L", "XL", "XXL", "XXXL"])
+                    add_miqdor = st.number_input("Miqdor", min_value=0, step=1, key="add_miqdor")
+                    add_narx = st.number_input("Narx", min_value=0, step=1000, key="add_narx")
+                    
+                    if st.button("Yangi rang/o'lcham qo'shish"):
+                        # Yangi qator yaratish
+                        new_row = {
+                            'mahsulot_id': selected_product_id,
+                            'mahsulot_nomi': current_name,
+                            'rasm_joyi': current_image_path,
+                            'toifa': current_toifa,
+                            'davlat': current_davlat,
+                            'dokon_id': current_dokon_id,
+                            'omborchi': current_omborchi,
+                            'rang': add_color,
+                            'olcham': add_olcham,
+                            'miqdor': add_miqdor,
+                            'narx': add_narx
+                        }
+                        
+                        # Inventar ma'lumotlariga qo'shish
+                        inventory_data = pd.concat([inventory_data, pd.DataFrame([new_row])], ignore_index=True)
+                        save_data(inventory_data)
+                        st.success("Yangi rang/o'lcham qo'shildi!")
+                        st.experimental_rerun()
+                
+                # Barcha o'zgarishlarni saqlash
+                if st.button("Asosiy ma'lumotlarni saqlash"):
+                    # Rasmni yangilash
+                    if new_image is not None:
+                        image = Image.open(new_image)
+                        new_image_path = save_image(image, selected_product_id)
+                    else:
+                        new_image_path = current_image_path
+                    
+                    # Filter the rows that need to be updated
+                    mask = (inventory_data['mahsulot_id'] == selected_product_id)
+                    
+                    # Update the values
+                    inventory_data.loc[mask, 'mahsulot_nomi'] = new_name
+                    inventory_data.loc[mask, 'toifa'] = new_toifa
+                    inventory_data.loc[mask, 'davlat'] = new_davlat
+                    inventory_data.loc[mask, 'dokon_id'] = new_dokon_id
+                    inventory_data.loc[mask, 'omborchi'] = new_omborchi
+                    inventory_data.loc[mask, 'rasm_joyi'] = new_image_path
+                    
+                    # Save the updated data
+                    save_data(inventory_data)
+                    st.success("Mahsulot ma'lumotlari muvaffaqiyatli yangilandi!")
+                    
+                    # Update session state
+                    st.session_state['davlat'] = new_davlat
+                    st.session_state['dokon_id'] = new_dokon_id
+                    st.session_state['omborchi'] = new_omborchi
+                    
+                    # Refresh page
+                    st.experimental_rerun()
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("© 2025 Omborxona Boshqarish Tizimi")
 
-    if app_menu == "Asosiy sahifa":
-        main()
-    elif app_menu == "Statistika":
-        stats_page(inventory_data)
+if __name__ == "__main__":
+    main()
